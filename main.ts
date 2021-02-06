@@ -82,7 +82,7 @@ class TweetdeckUtilities{
     private getVideoElement(videoMedia: IVideoMedia){
         const variants = videoMedia.video_info.variants;
         
-        if(variants?.length ?? 0 == 0){
+        if((variants?.length ?? 0) == 0){
             this.log("Video Media has no variants", videoMedia);
             return null;
         }
