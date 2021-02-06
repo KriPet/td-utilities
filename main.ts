@@ -1,48 +1,28 @@
 // ==UserScript==
 // @name       Tweetdeck utilities
 // @namespace  http://bakemo.no/
-// @version    0.13
+// @version    1.0
 // @description  Press "-" to clear column, press "q" to open images in selected tweet in full screen. Requires API keys to request info about media in tweets.
 // @match      https://tweetdeck.twitter.com/*
 // @copyright  2015+, Peter Kristoffersen
 // @inject-into page
 // @grant    GM_addStyle
-// @grant    GM_setValue
-// @grant    GM_getValue
-// @require    https://ce.peter.moe/diverse/file-host/hmac-sha1.js
-// @require    https://ce.peter.moe/diverse/file-host/hmac-sha256.js
-// @require    https://ce.peter.moe/diverse/file-host/oauth-1.0a.js
-// @require    https://ce.peter.moe/diverse/file-host/enc-base64.js
 // ==/UserScript==
 
 
 declare const unsafeWindow: Window & { 
-    TD: {controller: {columnManager: {getAllOrdered: () => ITweetdeckColumn[]}}}
-    prompt: (message: string) => string
+    TD: {
+        config: { bearer_token: string},
+        controller: {columnManager: {getAllOrdered: () => ITweetdeckColumn[]}}
+    }
 };
 
-declare const OAuth: (options: IOAuthOptions) => IOAuth;
-
-type GM_Keys = "ConsumerKey" | "ConsumerSecret" | "AccessToken" | "AccessSecret";
 declare const GM_addStyle: (style: string) => void;
-declare const GM_setValue: (key: GM_Keys, value: string | null) => void;
-declare const GM_getValue: (key: GM_Keys) => string | null;
+
 
 interface ITweetdeckColumn{
     model: {getKey: () => string }
     clear: () => void;
-}
-interface IOAuthOptions {
-    consumer: {
-        public: string | null, 
-        secret: string | null
-    }
-    signature_method: "HMAC-SHA1"
-}
-
-interface IOAuth {
-    authorize: (data: {url: string, method: string}, token: {public: string | null, secret: string | null }) => {oauth_signature: string}
-    toHeader: (data: {oauth_signature: string}) => {Authorization: string}
 }
 
 type IMedia = IVideoMedia | IPhotoMedia;
@@ -94,27 +74,10 @@ class QueueWithCallback<T>{
 }
 
 class TweetdeckUtilities{
-    private GetOAuthClient() {
-        return OAuth({
-            consumer: {
-                public: GM_getValue("ConsumerKey"),
-                secret: GM_getValue("ConsumerSecret")
-            },
-            signature_method: "HMAC-SHA1"
-        });
-    }
-    private get oAuthToken() {
-        return {
-            public: GM_getValue("AccessToken"),
-            secret: GM_getValue("AccessSecret")
-        };
-    };
-    
     private readonly overlayElementQueue: QueueWithCallback<HTMLElement>;
     private imageOverlayContainer!: HTMLDivElement;
     private imageOverlayInner!: HTMLDivElement;
     private imageOverlayCounter!: HTMLSpanElement;
-    
     
     private getVideoElement(videoMedia: IVideoMedia){
         const variants = videoMedia.video_info.variants;
@@ -233,21 +196,11 @@ class TweetdeckUtilities{
     }
     
     private mediaRequest(tweetId: string){
-        
-        const keys : GM_Keys[] = ["ConsumerKey", "ConsumerSecret", "AccessToken", "AccessSecret"];
-        if(keys.some(k => GM_getValue(k) === null)){
-            this.log("Not all values are defined. Press ctrl + i");
-            return;
-        }
-        
-        const oauth = this.GetOAuthClient();
         const url = `https://api.twitter.com/1.1/statuses/show.json?include_entities=true&tweet_mode=extended&id=${tweetId}`;
-        const oauthHeaders = oauth.toHeader(oauth.authorize({url, method: "GET"}, this.oAuthToken));
-        
         const request = new XMLHttpRequest();
         request.onreadystatechange = () => this.onMediaRequestStateChange(request);
         request.open("GET", url);
-        request.setRequestHeader("Authorization", oauthHeaders.Authorization);
+        request.setRequestHeader("Authorization", `Bearer ${unsafeWindow.TD.config.bearer_token}`);
         request.send();
     }
     
@@ -284,7 +237,6 @@ class TweetdeckUtilities{
     public constructor(){
         this.log("Initializing");
         this.overlayElementQueue = new QueueWithCallback((array) => this.imageOverlayCounter.innerText = `Left: ${array.length}`);
-        this.printVariables();
         this.log("Creating image overlay");
         this.createImageOverlayElem();
         this.log("Adding styles");
@@ -335,20 +287,6 @@ class TweetdeckUtilities{
         ");
     }
     
-    private printVariables(){
-        this.log("Variables:");
-        this.log("ConsumerKey: " + GM_getValue("ConsumerKey"));
-        this.log("ConsumerSecret: " + GM_getValue("ConsumerSecret"));
-        this.log("AccessToken: " + GM_getValue("AccessToken"));
-        this.log("AccessSecret: " + GM_getValue("AccessSecret"));
-    }
-    
-    private setVariables(){
-        GM_setValue("ConsumerKey", prompt("Input Twitter API ConsumerKey:", GM_getValue("ConsumerKey") ?? undefined));
-        GM_setValue("ConsumerSecret", prompt("Input Twitter API ConsumerSecret:", GM_getValue("ConsumerSecret") ?? undefined));
-        GM_setValue("AccessToken", prompt("Input Twitter API AccessToken:", GM_getValue("AccessToken") ?? undefined));
-        GM_setValue("AccessSecret", prompt("Input Twitter API AccessSecret:", GM_getValue("AccessSecret") ?? undefined));
-    }
     private bindListeners(){
         document.addEventListener('keyup', (event) => {
             switch(event.key){
@@ -360,12 +298,6 @@ class TweetdeckUtilities{
                     this.toggleOrAdvanceImageOverlay();
                     event.preventDefault();
                     event.stopPropagation();
-                    break;
-                }
-                case "i":{
-                    if(event.ctrlKey){
-                        this.setVariables();
-                    }
                     break;
                 }
             }
