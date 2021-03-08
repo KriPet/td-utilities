@@ -1,13 +1,15 @@
 "use strict";
 // ==UserScript==
-// @name       Tweetdeck utilities
-// @namespace  http://bakemo.no/
-// @version    1.0
-// @description  Press "-" to clear column, press "q" to open images in selected tweet in full screen. Requires API keys to request info about media in tweets.
-// @match      https://tweetdeck.twitter.com/*
-// @copyright  2015+, Peter Kristoffersen
-// @inject-into page
-// @grant    GM_addStyle
+// @name         Tweetdeck utilities
+// @namespace    http://bakemo.no/
+// @version      1.0
+// @author       Peter Kristoffersen
+// @description  Press "-" to clear column, press "q" to open images in selected tweet in full screen.
+// @match        https://tweetdeck.twitter.com/*
+// @updateUrl    https://github.com/KriPet/td-utilities/raw/master/td-utilities.user.js
+// @copyright    2015+, Peter Kristoffersen
+// @inject-into  page
+// @grant        GM_addStyle
 // ==/UserScript==
 class QueueWithCallback {
     constructor(callback) {
