@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweetdeck utilities
 // @namespace    http://bakemo.no/
-// @version      1.0
+// @version      1.1
 // @author       Peter Kristoffersen
 // @description  Press "-" to clear column, press "q" to open images in selected tweet in full screen.
 // @match        https://tweetdeck.twitter.com/*
@@ -76,12 +76,13 @@ class QueueWithCallback<T>{
 }
 
 class TweetdeckUtilities{
-    private readonly overlayElementQueue: QueueWithCallback<HTMLElement>;
-    private imageOverlayContainer!: HTMLDivElement;
-    private imageOverlayInner!: HTMLDivElement;
-    private imageOverlayCounter!: HTMLSpanElement;
+    private static overlayElementQueue: QueueWithCallback<HTMLElement>;
+    private static imageOverlayContainer: HTMLDivElement;
+    private static imageOverlayInner: HTMLDivElement;
+    private static imageOverlayCounter: HTMLSpanElement;
+    private static initialized = false;
     
-    private getVideoElement(videoMedia: IVideoMedia){
+    private static getVideoElement(videoMedia: IVideoMedia){
         const variants = videoMedia.video_info.variants;
         
         if((variants?.length ?? 0) == 0){
@@ -102,7 +103,7 @@ class TweetdeckUtilities{
     }
     
     
-    private clearSelectedColumn() : void {
+    private static clearSelectedColumn() : void {
         const columns = unsafeWindow.TD.controller.columnManager.getAllOrdered();
         const selectedColumnElem = document.querySelector(".is-selected-tweet")?.closest("[data-column]");
         if(selectedColumnElem === null || selectedColumnElem === undefined){
@@ -125,11 +126,11 @@ class TweetdeckUtilities{
         selectedColumn.clear();
     }
     
-    private log(...data: any[]){
+    private static log(...data: any[]){
         console.log("Tweetdeck Utilities:", ...data);
     }
     
-    private isMediaRequest(obj: unknown) : obj is IMediaRequest
+    private static isMediaRequest(obj: unknown) : obj is IMediaRequest
     {
         if(obj === null || obj === undefined){
             return false;
@@ -143,7 +144,7 @@ class TweetdeckUtilities{
         return false;
     }
     
-    private onMediaRequestCompleted(request: XMLHttpRequest){
+    private static onMediaRequestCompleted(request: XMLHttpRequest){
         const rJSON : unknown = JSON.parse(request.responseText ?? null);
         if(!this.isMediaRequest(rJSON)){
             this.log("Something is wrong with the received media response");
@@ -187,7 +188,7 @@ class TweetdeckUtilities{
         }
     }
     
-    private onMediaRequestStateChange(request: XMLHttpRequest){
+    private static onMediaRequestStateChange(request: XMLHttpRequest){
         this.log(`Got readyState ${request.readyState} on media request`);
         if(request.readyState === 4){
             this.log(`Got status ${request.status} on media request`);
@@ -197,7 +198,7 @@ class TweetdeckUtilities{
         }
     }
     
-    private mediaRequest(tweetId: string){
+    private static mediaRequest(tweetId: string){
         const url = `https://api.twitter.com/1.1/statuses/show.json?include_entities=true&tweet_mode=extended&id=${tweetId}`;
         const request = new XMLHttpRequest();
         request.onreadystatechange = () => this.onMediaRequestStateChange(request);
@@ -206,11 +207,11 @@ class TweetdeckUtilities{
         request.send();
     }
     
-    private clearAndHideOverlay(){
+    private static clearAndHideOverlay(){
         this.imageOverlayInner.innerHTML = "";
         this.imageOverlayContainer.style.display = "none";
     }
-    private showNextElementOnOverlay(){
+    private static showNextElementOnOverlay(){
         this.imageOverlayInner.innerHTML = "";
         this.imageOverlayContainer.style.display = "block";
         const newMedia = this.overlayElementQueue.shift();
@@ -219,7 +220,7 @@ class TweetdeckUtilities{
         }
     }
     
-    private toggleOrAdvanceImageOverlay(): void{
+    private static toggleOrAdvanceImageOverlay(): void{
         if(this.imageOverlayContainer.style.display == "block"){
             if(this.overlayElementQueue.length === 0){
                 this.clearAndHideOverlay();
@@ -236,7 +237,12 @@ class TweetdeckUtilities{
         }
     }
     
-    public constructor(){
+    public static initialize(){
+        if(this.initialized){
+            this.log("Already initialized");
+            return;
+        }
+        this.initialized = true;
         this.log("Initializing");
         this.overlayElementQueue = new QueueWithCallback((array) => this.imageOverlayCounter.innerText = `Left: ${array.length}`);
         this.log("Creating image overlay");
@@ -248,7 +254,7 @@ class TweetdeckUtilities{
         this.log("Done initializing");
     }
 
-    private createImageOverlayElem(){
+    private static createImageOverlayElem(){
         this.imageOverlayCounter = document.createElement("span");
         this.imageOverlayCounter.classList.add("counter");
         this.imageOverlayInner = document.createElement("div");
@@ -262,34 +268,33 @@ class TweetdeckUtilities{
         document.body.append(this.imageOverlayContainer);
     }
     
-    private addStyles(){
+    private static addStyles(){
         
-        GM_addStyle ( "                                     \
-        div.image_overlay{    \
-            height: 95%;    \
-            width: 95%;    \
-            position: fixed;    \
-            left: 50%;    \
-            top: 50%;    \
-            transform: translate(-50%, -50%);    \
-            z-index: 1000000;    \
-            border-radius: 10px;    \
-            background: rgba(100, 21, 148, 0.91);    \
-        }    \
-        \
-        div.image_overlay img, div.image_overlay video{    \
-            border: 0;    \
-            max-width: 98%;    \
-            max-height: 98%;    \
-            position: absolute;    \
-            left: 50%;    \
-            top: 50%;    \
-            transform: translate(-50%, -50%);    \
-        }                                              \
-        ");
+        GM_addStyle (`
+        div.image_overlay{
+            height: 95%;
+            width: 95%;
+            position: fixed;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000000;
+            border-radius: 10px;
+            background: rgba(100, 21, 148, 0.91);
+        }
+
+        div.image_overlay img, div.image_overlay video{
+            border: 0;
+            max-width: 98%;
+            max-height: 98%;
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }`);
     }
     
-    private bindListeners(){
+    private static bindListeners(){
         document.addEventListener('keyup', (event) => {
             switch(event.key){
                 case "-": {
@@ -308,4 +313,4 @@ class TweetdeckUtilities{
 }
 
 
-new TweetdeckUtilities();
+TweetdeckUtilities.initialize();
