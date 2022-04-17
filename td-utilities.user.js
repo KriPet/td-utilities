@@ -2,14 +2,12 @@
 // ==UserScript==
 // @name         Tweetdeck utilities
 // @namespace    http://bakemo.no/
-// @version      1.1
+// @version      1.2
 // @author       Peter Kristoffersen
 // @description  Press "-" to clear column, press "q" to open images in selected tweet in full screen.
 // @match        https://tweetdeck.twitter.com/*
-// @updateUrl    https://github.com/KriPet/td-utilities/raw/master/td-utilities.user.js
-// @copyright    2015+, Peter Kristoffersen
-// @inject-into  page
-// @grant        GM_addStyle
+// @downloadURL  https://github.com/KriPet/td-utilities/raw/master/td-utilities.user.js
+// @author       Peter Kristoffersen
 // ==/UserScript==
 class QueueWithCallback {
     constructor(callback) {
@@ -32,13 +30,18 @@ class QueueWithCallback {
 }
 class TweetdeckUtilities {
     static getVideoElement(videoMedia) {
+        var _a;
         const variants = videoMedia.video_info.variants;
-        if ((variants?.length ?? 0) == 0) {
+        if (((_a = variants === null || variants === void 0 ? void 0 : variants.length) !== null && _a !== void 0 ? _a : 0) == 0) {
             this.log("Video Media has no variants", videoMedia);
             return null;
         }
-        variants.sort((b, a) => (a.bitrate ?? -1) - (b.bitrate ?? -1));
+        variants.sort((b, a) => { var _a, _b; return ((_a = a.bitrate) !== null && _a !== void 0 ? _a : -1) - ((_b = b.bitrate) !== null && _b !== void 0 ? _b : -1); });
         const bestVariant = variants[0];
+        if (bestVariant === undefined) {
+            this.log("Video Media has no variants", videoMedia);
+            return null;
+        }
         const video_container = document.createElement("video");
         const source_element = document.createElement("source");
         video_container.setAttribute("autoplay", "");
@@ -49,8 +52,9 @@ class TweetdeckUtilities {
         return video_container;
     }
     static clearSelectedColumn() {
+        var _a;
         const columns = unsafeWindow.TD.controller.columnManager.getAllOrdered();
-        const selectedColumnElem = document.querySelector(".is-selected-tweet")?.closest("[data-column]");
+        const selectedColumnElem = (_a = document.querySelector(".is-selected-tweet")) === null || _a === void 0 ? void 0 : _a.closest("[data-column]");
         if (selectedColumnElem === null || selectedColumnElem === undefined) {
             this.log("No selected tweet, will not clear column");
             return;
@@ -61,12 +65,13 @@ class TweetdeckUtilities {
             return;
         }
         this.log("Target column id: " + target_column_id);
-        const selectedColumn = columns.find(col => col.model.getKey() == target_column_id);
-        if (selectedColumn === undefined) {
-            this.log(`Could not find column with ID '${target_column_id}'`);
-            return;
+        for (const col of columns) {
+            if (col.model.getKey() == target_column_id) {
+                col.clear();
+                return;
+            }
         }
-        selectedColumn.clear();
+        this.log(`Could not find column with ID '${target_column_id}'`);
     }
     static log(...data) {
         console.log("Tweetdeck Utilities:", ...data);
@@ -84,7 +89,8 @@ class TweetdeckUtilities {
         return false;
     }
     static onMediaRequestCompleted(request) {
-        const rJSON = JSON.parse(request.responseText ?? null);
+        var _a;
+        const rJSON = JSON.parse((_a = request.responseText) !== null && _a !== void 0 ? _a : null);
         if (!this.isMediaRequest(rJSON)) {
             this.log("Something is wrong with the received media response");
             this.log(request.responseText);
@@ -139,6 +145,7 @@ class TweetdeckUtilities {
         request.onreadystatechange = () => this.onMediaRequestStateChange(request);
         request.open("GET", url);
         request.setRequestHeader("Authorization", `Bearer ${unsafeWindow.TD.config.bearer_token}`);
+        request.setRequestHeader("X-Csrf-Token", unsafeWindow.TD.util.getCsrfTokenHeader());
         request.send();
     }
     static clearAndHideOverlay() {
@@ -154,6 +161,7 @@ class TweetdeckUtilities {
         }
     }
     static toggleOrAdvanceImageOverlay() {
+        var _a;
         if (this.imageOverlayContainer.style.display == "block") {
             if (this.overlayElementQueue.length === 0) {
                 this.clearAndHideOverlay();
@@ -163,7 +171,7 @@ class TweetdeckUtilities {
             }
         }
         else {
-            const tweetId = document.querySelector("article.is-selected-tweet")?.getAttribute('data-tweet-id');
+            const tweetId = (_a = document.querySelector("article.is-selected-tweet")) === null || _a === void 0 ? void 0 : _a.getAttribute('data-tweet-id');
             if (tweetId === null || tweetId === undefined) {
                 this.log("Could not find tweet ID");
                 return;
@@ -200,7 +208,13 @@ class TweetdeckUtilities {
         document.body.append(this.imageOverlayContainer);
     }
     static addStyles() {
-        GM_addStyle(`
+        let head = document.getElementsByTagName("head")[0];
+        if (head == undefined) {
+            return;
+        }
+        let style = document.createElement("style");
+        style.setAttribute('type', 'text/css');
+        style.textContent = `
         div.image_overlay{
             height: 95%;
             width: 95%;
@@ -221,7 +235,7 @@ class TweetdeckUtilities {
             left: 50%;
             top: 50%;
             transform: translate(-50%, -50%);
-        }`);
+        }`;
     }
     static bindListeners() {
         document.addEventListener('keyup', (event) => {

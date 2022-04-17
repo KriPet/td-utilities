@@ -1,42 +1,41 @@
 // ==UserScript==
 // @name         Tweetdeck utilities
 // @namespace    http://bakemo.no/
-// @version      1.1
+// @version      1.2
 // @author       Peter Kristoffersen
 // @description  Press "-" to clear column, press "q" to open images in selected tweet in full screen.
 // @match        https://tweetdeck.twitter.com/*
-// @updateUrl    https://github.com/KriPet/td-utilities/raw/master/td-utilities.user.js
-// @copyright    2015+, Peter Kristoffersen
-// @inject-into  page
-// @grant        GM_addStyle
+// @downloadURL  https://github.com/KriPet/td-utilities/raw/master/td-utilities.user.js
+// @author       Peter Kristoffersen
 // ==/UserScript==
 
 
-declare const unsafeWindow: Window & { 
+declare const unsafeWindow: Window & {
     TD: {
-        config: { bearer_token: string},
-        controller: {columnManager: {getAllOrdered: () => ITweetdeckColumn[]}}
+        config: { bearer_token: string },
+        controller: { columnManager: { getAllOrdered: () => ITweetdeckColumn[] } },
+        util: { getCsrfTokenHeader: () => string }
     }
 };
 
 declare const GM_addStyle: (style: string) => void;
 
 
-interface ITweetdeckColumn{
-    model: {getKey: () => string }
+interface ITweetdeckColumn {
+    model: { getKey: () => string }
     clear: () => void;
 }
 
 type IMedia = IVideoMedia | IPhotoMedia;
 
-interface IVideoVariant{
+interface IVideoVariant {
     bitrate?: number;
     url: string;
 }
 
 interface IVideoMedia {
     type: "video" | "animated_gif"
-    video_info: {variants: IVideoVariant[]}
+    video_info: { variants: IVideoVariant[] }
 }
 
 interface IPhotoMedia {
@@ -44,7 +43,7 @@ interface IPhotoMedia {
     media_url_https: string;
 }
 
-interface IExtendedEntities{
+interface IExtendedEntities {
     media: IMedia[];
 }
 
@@ -54,107 +53,113 @@ interface IMediaRequest {
 }
 
 class QueueWithCallback<T>{
-    private readonly innerArray :T[];
+    private readonly innerArray: T[];
     private readonly cb: (currentArray: T[]) => void;
-    constructor(callback: (currentArray: T[]) => void){
+    constructor(callback: (currentArray: T[]) => void) {
         this.innerArray = [];
         this.cb = callback;
     }
     public get length() {
         return this.innerArray.length;
     }
-    public shift(){
-        const ret =  this.innerArray.shift();
+    public shift() {
+        const ret = this.innerArray.shift();
         this.cb(this.innerArray);
         return ret;
     }
-    public push(elem: T){
+    public push(elem: T) {
         const ret = this.innerArray.push(elem);
         this.cb(this.innerArray);
         return ret;
     }
 }
 
-class TweetdeckUtilities{
+class TweetdeckUtilities {
     private static overlayElementQueue: QueueWithCallback<HTMLElement>;
     private static imageOverlayContainer: HTMLDivElement;
     private static imageOverlayInner: HTMLDivElement;
     private static imageOverlayCounter: HTMLSpanElement;
     private static initialized = false;
-    
-    private static getVideoElement(videoMedia: IVideoMedia){
+
+    private static getVideoElement(videoMedia: IVideoMedia) {
         const variants = videoMedia.video_info.variants;
-        
-        if((variants?.length ?? 0) == 0){
+
+        if ((variants?.length ?? 0) == 0) {
             this.log("Video Media has no variants", videoMedia);
             return null;
         }
-        
-        variants.sort((b,a) => (a.bitrate ?? -1) - (b.bitrate ?? -1));
+
+        variants.sort((b, a) => (a.bitrate ?? -1) - (b.bitrate ?? -1));
         const bestVariant = variants[0];
+
+        if (bestVariant === undefined) {
+            this.log("Video Media has no variants", videoMedia);
+            return null;
+        }
+
         const video_container = document.createElement("video");
         const source_element = document.createElement("source");
-        video_container.setAttribute("autoplay","");
-        video_container.setAttribute("loop","");
+        video_container.setAttribute("autoplay", "");
+        video_container.setAttribute("loop", "");
         video_container.setAttribute("controls", "");
         source_element.setAttribute("src", bestVariant.url);
         video_container.appendChild(source_element);
         return video_container;
     }
-    
-    
-    private static clearSelectedColumn() : void {
+
+
+    private static clearSelectedColumn(): void {
         const columns = unsafeWindow.TD.controller.columnManager.getAllOrdered();
         const selectedColumnElem = document.querySelector(".is-selected-tweet")?.closest("[data-column]");
-        if(selectedColumnElem === null || selectedColumnElem === undefined){
+        if (selectedColumnElem === null || selectedColumnElem === undefined) {
             this.log("No selected tweet, will not clear column");
             return;
         }
         const target_column_id = selectedColumnElem.getAttribute('data-column');
-        if(target_column_id === null){
+        if (target_column_id === null) {
             console.log("Could not get ID of selected column");
             return;
         }
         this.log("Target column id: " + target_column_id);
-        
-        const selectedColumn = columns.find(col => col.model.getKey() == target_column_id);
-        if(selectedColumn === undefined){
-            this.log(`Could not find column with ID '${target_column_id}'`);
-            return;
+
+        for (const col of columns) {
+            if (col.model.getKey() == target_column_id) {
+                col.clear();
+                return;
+            }
         }
-        
-        selectedColumn.clear();
+        this.log(`Could not find column with ID '${target_column_id}'`);
+
     }
-    
-    private static log(...data: any[]){
+
+    private static log(...data: any[]) {
         console.log("Tweetdeck Utilities:", ...data);
     }
-    
-    private static isMediaRequest(obj: unknown) : obj is IMediaRequest
-    {
-        if(obj === null || obj === undefined){
+
+    private static isMediaRequest(obj: unknown): obj is IMediaRequest {
+        if (obj === null || obj === undefined) {
             return false;
         }
-        if((obj as IMediaRequest).extended_entities !== undefined){
+        if ((obj as IMediaRequest).extended_entities !== undefined) {
             return true;
         }
-        if((obj as IMediaRequest).quoted_status_id_str !== undefined){
+        if ((obj as IMediaRequest).quoted_status_id_str !== undefined) {
             return true;
         }
         return false;
     }
-    
-    private static onMediaRequestCompleted(request: XMLHttpRequest){
-        const rJSON : unknown = JSON.parse(request.responseText ?? null);
-        if(!this.isMediaRequest(rJSON)){
+
+    private static onMediaRequestCompleted(request: XMLHttpRequest) {
+        const rJSON: unknown = JSON.parse(request.responseText ?? null);
+        if (!this.isMediaRequest(rJSON)) {
             this.log("Something is wrong with the received media response");
             this.log(request.responseText);
             return;
         }
         this.log("Got media request JSON", rJSON);
-        
-        if(rJSON.extended_entities === undefined){
-            if(rJSON.quoted_status_id_str !== undefined){
+
+        if (rJSON.extended_entities === undefined) {
+            if (rJSON.quoted_status_id_str !== undefined) {
                 this.log("Found quoted tweet. Running new media request");
                 this.mediaRequest(rJSON.quoted_status_id_str);
                 return;
@@ -162,83 +167,84 @@ class TweetdeckUtilities{
             this.log("Can't find extended entities or quoted tweet. Aborting.");
             return;
         }
-        
+
         const media = rJSON.extended_entities.media;
         this.log("media", media);
-        
-        for(const m of media){
-            if(m.type==="video" || m.type=="animated_gif"){
+
+        for (const m of media) {
+            if (m.type === "video" || m.type == "animated_gif") {
                 //Handle video
                 const videoElement = this.getVideoElement(m);
-                if(videoElement !== null){
+                if (videoElement !== null) {
                     this.overlayElementQueue.push(videoElement);
                 }
-            }else if(m.type==="photo"){
+            } else if (m.type === "photo") {
                 const url = m.media_url_https + ":orig";
                 const photoContainer = document.createElement("img");
                 photoContainer.setAttribute("src", url);
                 this.overlayElementQueue.push(photoContainer);
             }
         }
-        
-        if(this.overlayElementQueue.length>0){
+
+        if (this.overlayElementQueue.length > 0) {
             this.showNextElementOnOverlay();
-        }else{
+        } else {
             console.log("Couldn't find any media");
         }
     }
-    
-    private static onMediaRequestStateChange(request: XMLHttpRequest){
+
+    private static onMediaRequestStateChange(request: XMLHttpRequest) {
         this.log(`Got readyState ${request.readyState} on media request`);
-        if(request.readyState === 4){
+        if (request.readyState === 4) {
             this.log(`Got status ${request.status} on media request`);
-            if(request.status === 200){
+            if (request.status === 200) {
                 this.onMediaRequestCompleted(request);
             }
         }
     }
-    
-    private static mediaRequest(tweetId: string){
+
+    private static mediaRequest(tweetId: string) {
         const url = `https://api.twitter.com/1.1/statuses/show.json?include_entities=true&tweet_mode=extended&id=${tweetId}`;
         const request = new XMLHttpRequest();
         request.onreadystatechange = () => this.onMediaRequestStateChange(request);
         request.open("GET", url);
         request.setRequestHeader("Authorization", `Bearer ${unsafeWindow.TD.config.bearer_token}`);
+        request.setRequestHeader("X-Csrf-Token", unsafeWindow.TD.util.getCsrfTokenHeader());
         request.send();
     }
-    
-    private static clearAndHideOverlay(){
+
+    private static clearAndHideOverlay() {
         this.imageOverlayInner.innerHTML = "";
         this.imageOverlayContainer.style.display = "none";
     }
-    private static showNextElementOnOverlay(){
+    private static showNextElementOnOverlay() {
         this.imageOverlayInner.innerHTML = "";
         this.imageOverlayContainer.style.display = "block";
         const newMedia = this.overlayElementQueue.shift();
-        if(newMedia !== undefined){
+        if (newMedia !== undefined) {
             this.imageOverlayInner.appendChild(newMedia);
         }
     }
-    
-    private static toggleOrAdvanceImageOverlay(): void{
-        if(this.imageOverlayContainer.style.display == "block"){
-            if(this.overlayElementQueue.length === 0){
+
+    private static toggleOrAdvanceImageOverlay(): void {
+        if (this.imageOverlayContainer.style.display == "block") {
+            if (this.overlayElementQueue.length === 0) {
                 this.clearAndHideOverlay();
-            }else{
+            } else {
                 this.showNextElementOnOverlay();
             }
-        }else{
+        } else {
             const tweetId = document.querySelector("article.is-selected-tweet")?.getAttribute('data-tweet-id');
-            if(tweetId === null || tweetId === undefined){
+            if (tweetId === null || tweetId === undefined) {
                 this.log("Could not find tweet ID");
                 return;
             }
             this.mediaRequest(tweetId);
         }
     }
-    
-    public static initialize(){
-        if(this.initialized){
+
+    public static initialize() {
+        if (this.initialized) {
             this.log("Already initialized");
             return;
         }
@@ -254,7 +260,7 @@ class TweetdeckUtilities{
         this.log("Done initializing");
     }
 
-    private static createImageOverlayElem(){
+    private static createImageOverlayElem() {
         this.imageOverlayCounter = document.createElement("span");
         this.imageOverlayCounter.classList.add("counter");
         this.imageOverlayInner = document.createElement("div");
@@ -267,10 +273,15 @@ class TweetdeckUtilities{
         this.imageOverlayContainer.appendChild(this.imageOverlayInner);
         document.body.append(this.imageOverlayContainer);
     }
-    
-    private static addStyles(){
-        
-        GM_addStyle (`
+
+    private static addStyles() {
+        let head = document.getElementsByTagName("head")[0];
+        if (head == undefined) {
+            return;
+        }
+        let style = document.createElement("style");
+        style.setAttribute('type', 'text/css');
+        style.textContent = `
         div.image_overlay{
             height: 95%;
             width: 95%;
@@ -291,12 +302,12 @@ class TweetdeckUtilities{
             left: 50%;
             top: 50%;
             transform: translate(-50%, -50%);
-        }`);
+        }`;
     }
-    
-    private static bindListeners(){
+
+    private static bindListeners() {
         document.addEventListener('keyup', (event) => {
-            switch(event.key){
+            switch (event.key) {
                 case "-": {
                     this.clearSelectedColumn();
                     break;
