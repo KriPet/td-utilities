@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         Tweetdeck utilities
 // @namespace    http://bakemo.no/
-// @version      1.2
+// @version      1.2.1
 // @author       Peter Kristoffersen
 // @description  Press "-" to clear column, press "q" to open images in selected tweet in full screen.
 // @match        https://tweetdeck.twitter.com/*
@@ -236,6 +236,7 @@ class TweetdeckUtilities {
             top: 50%;
             transform: translate(-50%, -50%);
         }`;
+        head.appendChild(style);
     }
     static bindListeners() {
         document.addEventListener('keyup', (event) => {
