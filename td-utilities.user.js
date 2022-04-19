@@ -2,12 +2,11 @@
 // ==UserScript==
 // @name         Tweetdeck utilities
 // @namespace    http://bakemo.no/
-// @version      1.2.1
+// @version      1.3.0
 // @author       Peter Kristoffersen
 // @description  Press "-" to clear column, press "q" to open images in selected tweet in full screen.
 // @match        https://tweetdeck.twitter.com/*
 // @downloadURL  https://github.com/KriPet/td-utilities/raw/master/td-utilities.user.js
-// @author       Peter Kristoffersen
 // ==/UserScript==
 class QueueWithCallback {
     constructor(callback) {
@@ -32,7 +31,7 @@ class TweetdeckUtilities {
     static getVideoElement(videoMedia) {
         var _a;
         const variants = videoMedia.video_info.variants;
-        if (((_a = variants === null || variants === void 0 ? void 0 : variants.length) !== null && _a !== void 0 ? _a : 0) == 0) {
+        if (((_a = variants === null || variants === void 0 ? void 0 : variants.length) !== null && _a !== void 0 ? _a : 0) === 0) {
             this.log("Video Media has no variants", videoMedia);
             return null;
         }
@@ -52,26 +51,28 @@ class TweetdeckUtilities {
         return video_container;
     }
     static clearSelectedColumn() {
-        var _a;
         const columns = unsafeWindow.TD.controller.columnManager.getAllOrdered();
-        const selectedColumnElem = (_a = document.querySelector(".is-selected-tweet")) === null || _a === void 0 ? void 0 : _a.closest("[data-column]");
-        if (selectedColumnElem === null || selectedColumnElem === undefined) {
+        const selectedTweetElem = document.querySelector(".is-selected-tweet");
+        const selectedTweetDataset = selectedTweetElem === null || selectedTweetElem === void 0 ? void 0 : selectedTweetElem.dataset;
+        const selectedTweetId = selectedTweetDataset === null || selectedTweetDataset === void 0 ? void 0 : selectedTweetDataset.key;
+        if (selectedTweetId == null) {
             this.log("No selected tweet, will not clear column");
             return;
         }
-        const target_column_id = selectedColumnElem.getAttribute('data-column');
-        if (target_column_id === null) {
-            console.log("Could not get ID of selected column");
-            return;
-        }
-        this.log("Target column id: " + target_column_id);
         for (const col of columns) {
-            if (col.model.getKey() == target_column_id) {
-                col.clear();
+            const tweet = col.findChirp(selectedTweetId);
+            if (tweet) {
+                this.clearUpTo(col, tweet);
                 return;
             }
         }
-        this.log(`Could not find column with ID '${target_column_id}'`);
+        this.log(`Could not find tweet with ID '${selectedTweetId}'`);
+    }
+    static clearUpTo(col, tweet) {
+        const timeStamp = tweet.created.getTime();
+        col.model.setClearedTimestamp(timeStamp);
+        const tweetIndex = col.updateArray.indexOf(tweet);
+        col.discardTweetsNotInRange(0, tweetIndex);
     }
     static log(...data) {
         console.log("Tweetdeck Utilities:", ...data);
@@ -109,8 +110,8 @@ class TweetdeckUtilities {
         const media = rJSON.extended_entities.media;
         this.log("media", media);
         for (const m of media) {
-            if (m.type === "video" || m.type == "animated_gif") {
-                //Handle video
+            if (m.type === "video" || m.type === "animated_gif") {
+                // Handle video
                 const videoElement = this.getVideoElement(m);
                 if (videoElement !== null) {
                     this.overlayElementQueue.push(videoElement);
@@ -162,7 +163,7 @@ class TweetdeckUtilities {
     }
     static toggleOrAdvanceImageOverlay() {
         var _a;
-        if (this.imageOverlayContainer.style.display == "block") {
+        if (this.imageOverlayContainer.style.display === "block") {
             if (this.overlayElementQueue.length === 0) {
                 this.clearAndHideOverlay();
             }
@@ -186,7 +187,9 @@ class TweetdeckUtilities {
         }
         this.initialized = true;
         this.log("Initializing");
-        this.overlayElementQueue = new QueueWithCallback((array) => this.imageOverlayCounter.innerText = `Left: ${array.length}`);
+        this.overlayElementQueue = new QueueWithCallback((array) => {
+            this.imageOverlayCounter.innerText = `Left: ${array.length}`;
+        });
         this.log("Creating image overlay");
         this.createImageOverlayElem();
         this.log("Adding styles");
@@ -208,11 +211,11 @@ class TweetdeckUtilities {
         document.body.append(this.imageOverlayContainer);
     }
     static addStyles() {
-        let head = document.getElementsByTagName("head")[0];
-        if (head == undefined) {
+        const head = document.getElementsByTagName("head")[0];
+        if (head == null) {
             return;
         }
-        let style = document.createElement("style");
+        const style = document.createElement("style");
         style.setAttribute('type', 'text/css');
         style.textContent = `
         div.image_overlay{
