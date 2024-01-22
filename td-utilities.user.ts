@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         Tweetdeck utilities
 // @namespace    http://bakemo.no/
-// @version      1.3.0
+// @version      1.4.1
 // @author       Peter Kristoffersen
 // @description  Press "-" to clear column, press "q" to open images in selected tweet in full screen.
 // @match        https://tweetdeck.twitter.com/*
+// @match        https://twitter.com/i/tweetdeck
 // @downloadURL  https://github.com/KriPet/td-utilities/raw/master/td-utilities.user.js
 // ==/UserScript==
 
@@ -93,32 +94,6 @@ class TweetdeckUtilities {
     private static imageOverlayCounter: HTMLSpanElement;
     private static initialized = false;
 
-    private static getVideoElement(videoMedia: IVideoMedia) {
-        const variants = videoMedia.video_info.variants
-
-        if ((variants?.length ?? 0) === 0) {
-            this.log("Video Media has no variants", videoMedia)
-            return null
-        }
-
-        variants.sort((b, a) => (a.bitrate ?? -1) - (b.bitrate ?? -1))
-        const bestVariant = variants[0]
-
-        if (bestVariant === undefined) {
-            this.log("Video Media has no variants", videoMedia)
-            return null
-        }
-
-        const video_container = document.createElement("video")
-        const source_element = document.createElement("source")
-        video_container.setAttribute("autoplay", "")
-        video_container.setAttribute("loop", "")
-        video_container.setAttribute("controls", "")
-        source_element.setAttribute("src", bestVariant.url)
-        video_container.appendChild(source_element)
-        return video_container
-    }
-
     private static clearSelectedColumn(): void {
         const columns = unsafeWindow.TD.controller.columnManager.getAllOrdered()
         const selectedTweetElem = document.querySelector(".is-selected-tweet") as HTMLDivElement | null
@@ -151,83 +126,6 @@ class TweetdeckUtilities {
         console.log("Tweetdeck Utilities:", ...data)
     }
 
-    private static isMediaRequest(obj: unknown): obj is IMediaRequest {
-        if (obj === null || obj === undefined) {
-            return false
-        }
-        if ((obj as IMediaRequest).extended_entities !== undefined) {
-            return true
-        }
-        if ((obj as IMediaRequest).quoted_status_id_str !== undefined) {
-            return true
-        }
-        return false
-    }
-
-    private static onMediaRequestCompleted(request: XMLHttpRequest) {
-        const rJSON: unknown = JSON.parse(request.responseText ?? null)
-        if (!this.isMediaRequest(rJSON)) {
-            this.log("Something is wrong with the received media response")
-            this.log(request.responseText)
-            return
-        }
-        this.log("Got media request JSON", rJSON)
-
-        if (rJSON.extended_entities === undefined) {
-            if (rJSON.quoted_status_id_str !== undefined) {
-                this.log("Found quoted tweet. Running new media request")
-                this.mediaRequest(rJSON.quoted_status_id_str)
-                return
-            }
-            this.log("Can't find extended entities or quoted tweet. Aborting.")
-            return
-        }
-
-        const media = rJSON.extended_entities.media
-        this.log("media", media)
-
-        for (const m of media) {
-            if (m.type === "video" || m.type === "animated_gif") {
-                // Handle video
-                const videoElement = this.getVideoElement(m)
-                if (videoElement !== null) {
-                    this.overlayElementQueue.push(videoElement)
-                }
-            } else if (m.type === "photo") {
-                const url = m.media_url_https + ":orig"
-                const photoContainer = document.createElement("img")
-                photoContainer.setAttribute("src", url)
-                this.overlayElementQueue.push(photoContainer)
-            }
-        }
-
-        if (this.overlayElementQueue.length > 0) {
-            this.showNextElementOnOverlay()
-        } else {
-            console.log("Couldn't find any media")
-        }
-    }
-
-    private static onMediaRequestStateChange(request: XMLHttpRequest) {
-        this.log(`Got readyState ${request.readyState} on media request`)
-        if (request.readyState === 4) {
-            this.log(`Got status ${request.status} on media request`)
-            if (request.status === 200) {
-                this.onMediaRequestCompleted(request)
-            }
-        }
-    }
-
-    private static mediaRequest(tweetId: string) {
-        const url = `https://api.twitter.com/1.1/statuses/show.json?include_entities=true&tweet_mode=extended&id=${tweetId}`
-        const request = new XMLHttpRequest()
-        request.onreadystatechange = () => this.onMediaRequestStateChange(request)
-        request.open("GET", url)
-        request.setRequestHeader("Authorization", `Bearer ${unsafeWindow.TD.config.bearer_token}`)
-        request.setRequestHeader("X-Csrf-Token", unsafeWindow.TD.util.getCsrfTokenHeader())
-        request.send()
-    }
-
     private static clearAndHideOverlay() {
         this.imageOverlayInner.innerHTML = ""
         this.imageOverlayContainer.style.display = "none"
@@ -250,13 +148,65 @@ class TweetdeckUtilities {
                 this.showNextElementOnOverlay()
             }
         } else {
-            const tweetId = document.querySelector("article.is-selected-tweet")?.getAttribute('data-tweet-id')
-            if (tweetId === null || tweetId === undefined) {
-                this.log("Could not find tweet ID")
+            const selectedTweet = document.querySelector("article.is-selected-tweet");
+            if (selectedTweet == null) {
+                this.log("Could not find selected tweet")
                 return
             }
-            this.mediaRequest(tweetId)
+            const numImages = this.findTweetImage(selectedTweet);
+            const numVideos = this.findTweetVideo(selectedTweet);
+
+            console.log(`Found ${numImages} images`);
+            console.log(`Found ${numVideos} videos`);
+
+            if (this.overlayElementQueue.length > 0) {
+                this.showNextElementOnOverlay()
+            } else {
+                console.log("Couldn't find any media")
+            }
         }
+    }
+
+    private static findTweetVideo(element: Element) {
+        const videos = element.querySelectorAll<HTMLVideoElement>("video.media-item-gif");
+        videos.forEach(v => {
+            const clone = v.cloneNode() as HTMLVideoElement;
+            clone.className = ""
+            clone.loop = true;
+            clone.autoplay = true;
+            clone.controls = true;
+            this.overlayElementQueue.push(clone);
+        })
+
+        return videos.length
+    }
+
+    private static findTweetImage(element: Element) {
+        const mediaContainers = element.querySelectorAll<HTMLAnchorElement>("a.js-media-image-link");
+        const backgroundImages = Array.from(mediaContainers).map(cont => cont.style.backgroundImage)
+        // We now have a list of strings like this: 
+        // 'url("https://pbs.twimg.com/media/<IMAGEID>.jpg?format=jpg&name=small")'
+        // We only want the part from https:// to .jpg
+        //
+        const imageUrls = backgroundImages.map(i => {
+            const url = new URL(i.slice(5, -2))
+            url.searchParams.delete("format")
+            url.searchParams.set("name", "orig")
+            return url.toString()
+        })
+
+        imageUrls.forEach(url => {
+            const mediaContainer = document.createElement("div");
+            const photoContainer = document.createElement("img");
+
+            photoContainer.setAttribute("src", url);
+
+            mediaContainer.appendChild(photoContainer);
+
+            this.overlayElementQueue.push(mediaContainer);
+        })
+
+        return imageUrls.length;
     }
 
     public static initialize() {

@@ -2,10 +2,11 @@
 // ==UserScript==
 // @name         Tweetdeck utilities
 // @namespace    http://bakemo.no/
-// @version      1.3.0
+// @version      1.4.1
 // @author       Peter Kristoffersen
 // @description  Press "-" to clear column, press "q" to open images in selected tweet in full screen.
 // @match        https://tweetdeck.twitter.com/*
+// @match        https://twitter.com/i/tweetdeck
 // @downloadURL  https://github.com/KriPet/td-utilities/raw/master/td-utilities.user.js
 // ==/UserScript==
 class QueueWithCallback {
@@ -28,28 +29,6 @@ class QueueWithCallback {
     }
 }
 class TweetdeckUtilities {
-    static getVideoElement(videoMedia) {
-        var _a;
-        const variants = videoMedia.video_info.variants;
-        if (((_a = variants === null || variants === void 0 ? void 0 : variants.length) !== null && _a !== void 0 ? _a : 0) === 0) {
-            this.log("Video Media has no variants", videoMedia);
-            return null;
-        }
-        variants.sort((b, a) => { var _a, _b; return ((_a = a.bitrate) !== null && _a !== void 0 ? _a : -1) - ((_b = b.bitrate) !== null && _b !== void 0 ? _b : -1); });
-        const bestVariant = variants[0];
-        if (bestVariant === undefined) {
-            this.log("Video Media has no variants", videoMedia);
-            return null;
-        }
-        const video_container = document.createElement("video");
-        const source_element = document.createElement("source");
-        video_container.setAttribute("autoplay", "");
-        video_container.setAttribute("loop", "");
-        video_container.setAttribute("controls", "");
-        source_element.setAttribute("src", bestVariant.url);
-        video_container.appendChild(source_element);
-        return video_container;
-    }
     static clearSelectedColumn() {
         const columns = unsafeWindow.TD.controller.columnManager.getAllOrdered();
         const selectedTweetElem = document.querySelector(".is-selected-tweet");
@@ -77,78 +56,6 @@ class TweetdeckUtilities {
     static log(...data) {
         console.log("Tweetdeck Utilities:", ...data);
     }
-    static isMediaRequest(obj) {
-        if (obj === null || obj === undefined) {
-            return false;
-        }
-        if (obj.extended_entities !== undefined) {
-            return true;
-        }
-        if (obj.quoted_status_id_str !== undefined) {
-            return true;
-        }
-        return false;
-    }
-    static onMediaRequestCompleted(request) {
-        var _a;
-        const rJSON = JSON.parse((_a = request.responseText) !== null && _a !== void 0 ? _a : null);
-        if (!this.isMediaRequest(rJSON)) {
-            this.log("Something is wrong with the received media response");
-            this.log(request.responseText);
-            return;
-        }
-        this.log("Got media request JSON", rJSON);
-        if (rJSON.extended_entities === undefined) {
-            if (rJSON.quoted_status_id_str !== undefined) {
-                this.log("Found quoted tweet. Running new media request");
-                this.mediaRequest(rJSON.quoted_status_id_str);
-                return;
-            }
-            this.log("Can't find extended entities or quoted tweet. Aborting.");
-            return;
-        }
-        const media = rJSON.extended_entities.media;
-        this.log("media", media);
-        for (const m of media) {
-            if (m.type === "video" || m.type === "animated_gif") {
-                // Handle video
-                const videoElement = this.getVideoElement(m);
-                if (videoElement !== null) {
-                    this.overlayElementQueue.push(videoElement);
-                }
-            }
-            else if (m.type === "photo") {
-                const url = m.media_url_https + ":orig";
-                const photoContainer = document.createElement("img");
-                photoContainer.setAttribute("src", url);
-                this.overlayElementQueue.push(photoContainer);
-            }
-        }
-        if (this.overlayElementQueue.length > 0) {
-            this.showNextElementOnOverlay();
-        }
-        else {
-            console.log("Couldn't find any media");
-        }
-    }
-    static onMediaRequestStateChange(request) {
-        this.log(`Got readyState ${request.readyState} on media request`);
-        if (request.readyState === 4) {
-            this.log(`Got status ${request.status} on media request`);
-            if (request.status === 200) {
-                this.onMediaRequestCompleted(request);
-            }
-        }
-    }
-    static mediaRequest(tweetId) {
-        const url = `https://api.twitter.com/1.1/statuses/show.json?include_entities=true&tweet_mode=extended&id=${tweetId}`;
-        const request = new XMLHttpRequest();
-        request.onreadystatechange = () => this.onMediaRequestStateChange(request);
-        request.open("GET", url);
-        request.setRequestHeader("Authorization", `Bearer ${unsafeWindow.TD.config.bearer_token}`);
-        request.setRequestHeader("X-Csrf-Token", unsafeWindow.TD.util.getCsrfTokenHeader());
-        request.send();
-    }
     static clearAndHideOverlay() {
         this.imageOverlayInner.innerHTML = "";
         this.imageOverlayContainer.style.display = "none";
@@ -162,7 +69,6 @@ class TweetdeckUtilities {
         }
     }
     static toggleOrAdvanceImageOverlay() {
-        var _a;
         if (this.imageOverlayContainer.style.display === "block") {
             if (this.overlayElementQueue.length === 0) {
                 this.clearAndHideOverlay();
@@ -172,13 +78,56 @@ class TweetdeckUtilities {
             }
         }
         else {
-            const tweetId = (_a = document.querySelector("article.is-selected-tweet")) === null || _a === void 0 ? void 0 : _a.getAttribute('data-tweet-id');
-            if (tweetId === null || tweetId === undefined) {
-                this.log("Could not find tweet ID");
+            const selectedTweet = document.querySelector("article.is-selected-tweet");
+            if (selectedTweet == null) {
+                this.log("Could not find selected tweet");
                 return;
             }
-            this.mediaRequest(tweetId);
+            const numImages = this.findTweetImage(selectedTweet);
+            const numVideos = this.findTweetVideo(selectedTweet);
+            console.log(`Found ${numImages} images`);
+            console.log(`Found ${numVideos} videos`);
+            if (this.overlayElementQueue.length > 0) {
+                this.showNextElementOnOverlay();
+            }
+            else {
+                console.log("Couldn't find any media");
+            }
         }
+    }
+    static findTweetVideo(element) {
+        const videos = element.querySelectorAll("video.media-item-gif");
+        videos.forEach(v => {
+            const clone = v.cloneNode();
+            clone.className = "";
+            clone.loop = true;
+            clone.autoplay = true;
+            clone.controls = true;
+            this.overlayElementQueue.push(clone);
+        });
+        return videos.length;
+    }
+    static findTweetImage(element) {
+        const mediaContainers = element.querySelectorAll("a.js-media-image-link");
+        const backgroundImages = Array.from(mediaContainers).map(cont => cont.style.backgroundImage);
+        // We now have a list of strings like this: 
+        // 'url("https://pbs.twimg.com/media/<IMAGEID>.jpg?format=jpg&name=small")'
+        // We only want the part from https:// to .jpg
+        //
+        const imageUrls = backgroundImages.map(i => {
+            const url = new URL(i.slice(5, -2));
+            url.searchParams.delete("format");
+            url.searchParams.set("name", "orig");
+            return url.toString();
+        });
+        imageUrls.forEach(url => {
+            const mediaContainer = document.createElement("div");
+            const photoContainer = document.createElement("img");
+            photoContainer.setAttribute("src", url);
+            mediaContainer.appendChild(photoContainer);
+            this.overlayElementQueue.push(mediaContainer);
+        });
+        return imageUrls.length;
     }
     static initialize() {
         if (this.initialized) {
