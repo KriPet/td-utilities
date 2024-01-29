@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         Tweetdeck utilities
 // @namespace    http://bakemo.no/
-// @version      1.4.1
+// @version      1.5.0
 // @author       Peter Kristoffersen
 // @description  Press "-" to clear column, press "q" to open images in selected tweet in full screen.
 // @match        https://tweetdeck.twitter.com/*
@@ -61,11 +61,13 @@ class TweetdeckUtilities {
         this.imageOverlayContainer.style.display = "none";
     }
     static showNextElementOnOverlay() {
+        var _a;
         this.imageOverlayInner.innerHTML = "";
         this.imageOverlayContainer.style.display = "block";
         const newMedia = this.overlayElementQueue.shift();
         if (newMedia !== undefined) {
             this.imageOverlayInner.appendChild(newMedia);
+            (_a = newMedia.parentElement) === null || _a === void 0 ? void 0 : _a.querySelectorAll("video").forEach(v => v.autoplay = true);
         }
     }
     static toggleOrAdvanceImageOverlay() {
@@ -83,10 +85,8 @@ class TweetdeckUtilities {
                 this.log("Could not find selected tweet");
                 return;
             }
-            const numImages = this.findTweetImage(selectedTweet);
-            const numVideos = this.findTweetVideo(selectedTweet);
-            console.log(`Found ${numImages} images`);
-            console.log(`Found ${numVideos} videos`);
+            const numEntities = this.findEntities(selectedTweet);
+            console.log(`Found ${numEntities} entities`);
             if (this.overlayElementQueue.length > 0) {
                 this.showNextElementOnOverlay();
             }
@@ -95,39 +95,46 @@ class TweetdeckUtilities {
             }
         }
     }
-    static findTweetVideo(element) {
-        const videos = element.querySelectorAll("video.media-item-gif");
-        videos.forEach(v => {
-            const clone = v.cloneNode();
-            clone.className = "";
-            clone.loop = true;
-            clone.autoplay = true;
-            clone.controls = true;
-            this.overlayElementQueue.push(clone);
-        });
-        return videos.length;
+    static findEntities(element) {
+        var _a;
+        const tweetId = element.dataset["key"];
+        const columnId = (_a = element.closest(".js-chirp-container, .js-column")) === null || _a === void 0 ? void 0 : _a.dataset["column"];
+        if (!tweetId || !columnId)
+            return 0;
+        const column = unsafeWindow.TD.controller.columnManager.get(columnId);
+        if (!column)
+            return 0;
+        const tweetObject = column.findChirp(tweetId);
+        return this.findEntitiesInner(tweetObject);
     }
-    static findTweetImage(element) {
-        const mediaContainers = element.querySelectorAll("a.js-media-image-link");
-        const backgroundImages = Array.from(mediaContainers).map(cont => cont.style.backgroundImage);
-        // We now have a list of strings like this: 
-        // 'url("https://pbs.twimg.com/media/<IMAGEID>.jpg?format=jpg&name=small")'
-        // We only want the part from https:// to .jpg
-        //
-        const imageUrls = backgroundImages.map(i => {
-            const url = new URL(i.slice(5, -2));
-            url.searchParams.delete("format");
-            url.searchParams.set("name", "orig");
-            return url.toString();
-        });
-        imageUrls.forEach(url => {
-            const mediaContainer = document.createElement("div");
-            const photoContainer = document.createElement("img");
-            photoContainer.setAttribute("src", url);
-            mediaContainer.appendChild(photoContainer);
-            this.overlayElementQueue.push(mediaContainer);
-        });
-        return imageUrls.length;
+    static findEntitiesInner(tweetObject) {
+        var _a;
+        if (!tweetObject)
+            return 0;
+        console.info("Tweet Object", tweetObject);
+        for (const medium of tweetObject.entities.media) {
+            if (medium.type === "video" || medium.type === "animated_gif") {
+                const videoElement = document.createElement("video");
+                videoElement.loop = true;
+                videoElement.poster = medium.media_url_https;
+                videoElement.controls = true;
+                for (const source of medium.video_info.variants) {
+                    const sourceElement = document.createElement("source");
+                    sourceElement.src = (_a = source.url) !== null && _a !== void 0 ? _a : "";
+                    sourceElement.type = source.content_type;
+                    videoElement.appendChild(sourceElement);
+                }
+                this.overlayElementQueue.push(videoElement);
+            }
+            else {
+                const imageElement = document.createElement("img");
+                const imageUrl = new URL(medium.media_url_https);
+                imageUrl.searchParams.set("name", "orig");
+                imageElement.src = imageUrl.toString();
+                this.overlayElementQueue.push(imageElement);
+            }
+        }
+        return tweetObject.entities.media.length + this.findEntitiesInner(tweetObject.quotedTweet);
     }
     static initialize() {
         if (this.initialized) {

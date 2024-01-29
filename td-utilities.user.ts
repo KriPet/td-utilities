@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweetdeck utilities
 // @namespace    http://bakemo.no/
-// @version      1.4.1
+// @version      1.5.0
 // @author       Peter Kristoffersen
 // @description  Press "-" to clear column, press "q" to open images in selected tweet in full screen.
 // @match        https://tweetdeck.twitter.com/*
@@ -12,7 +12,12 @@
 declare const unsafeWindow: Window & {
     TD: {
         config: { bearer_token: string },
-        controller: { columnManager: { getAllOrdered: () => ITweetdeckColumn[] } },
+        controller: {
+            columnManager: {
+                getAllOrdered(): ITweetdeckColumn[],
+                get(columnId: string): ITweetdeckColumn
+            }
+        },
         util: { getCsrfTokenHeader: () => string }
     }
 }
@@ -32,34 +37,23 @@ interface ITweetdeckColumn {
 }
 
 interface ITweetdeckTweet {
-    id: string;
-    created: Date;
+    id: string
+    created: Date
+    entities: { media: (IMedia)[] }
+    quotedTweet?: ITweetdeckTweet
 }
 
 type IMedia = IVideoMedia | IPhotoMedia;
 
-interface IVideoVariant {
-    bitrate?: number;
-    url: string;
-}
-
 interface IVideoMedia {
+    video_info: { variants: { url: string, content_type: string }[] }
     type: "video" | "animated_gif"
-    video_info: { variants: IVideoVariant[] }
+    media_url_https: string
 }
 
 interface IPhotoMedia {
     type: "photo"
-    media_url_https: string;
-}
-
-interface IExtendedEntities {
-    media: IMedia[];
-}
-
-interface IMediaRequest {
-    extended_entities?: IExtendedEntities;
-    quoted_status_id_str?: string;
+    media_url_https: string
 }
 
 class QueueWithCallback<T> {
@@ -137,6 +131,7 @@ class TweetdeckUtilities {
         const newMedia = this.overlayElementQueue.shift()
         if (newMedia !== undefined) {
             this.imageOverlayInner.appendChild(newMedia)
+            newMedia.parentElement?.querySelectorAll("video").forEach(v => v.autoplay = true);
         }
     }
 
@@ -148,16 +143,13 @@ class TweetdeckUtilities {
                 this.showNextElementOnOverlay()
             }
         } else {
-            const selectedTweet = document.querySelector("article.is-selected-tweet");
+            const selectedTweet = document.querySelector<HTMLElement>("article.is-selected-tweet");
             if (selectedTweet == null) {
                 this.log("Could not find selected tweet")
                 return
             }
-            const numImages = this.findTweetImage(selectedTweet);
-            const numVideos = this.findTweetVideo(selectedTweet);
-
-            console.log(`Found ${numImages} images`);
-            console.log(`Found ${numVideos} videos`);
+            const numEntities = this.findEntities(selectedTweet);
+            console.log(`Found ${numEntities} entities`);
 
             if (this.overlayElementQueue.length > 0) {
                 this.showNextElementOnOverlay()
@@ -167,46 +159,48 @@ class TweetdeckUtilities {
         }
     }
 
-    private static findTweetVideo(element: Element) {
-        const videos = element.querySelectorAll<HTMLVideoElement>("video.media-item-gif");
-        videos.forEach(v => {
-            const clone = v.cloneNode() as HTMLVideoElement;
-            clone.className = ""
-            clone.loop = true;
-            clone.autoplay = true;
-            clone.controls = true;
-            this.overlayElementQueue.push(clone);
-        })
+    private static findEntities(element: HTMLElement) {
+        const tweetId = element.dataset["key"]
+        const columnId = element.closest<HTMLElement>(".js-chirp-container, .js-column")?.dataset["column"]
+        if (!tweetId || !columnId)
+            return 0
+        const column = unsafeWindow.TD.controller.columnManager.get(columnId);
+        if (!column)
+            return 0
+        const tweetObject = column.findChirp(tweetId);
 
-        return videos.length
+        return this.findEntitiesInner(tweetObject);
     }
 
-    private static findTweetImage(element: Element) {
-        const mediaContainers = element.querySelectorAll<HTMLAnchorElement>("a.js-media-image-link");
-        const backgroundImages = Array.from(mediaContainers).map(cont => cont.style.backgroundImage)
-        // We now have a list of strings like this: 
-        // 'url("https://pbs.twimg.com/media/<IMAGEID>.jpg?format=jpg&name=small")'
-        // We only want the part from https:// to .jpg
-        //
-        const imageUrls = backgroundImages.map(i => {
-            const url = new URL(i.slice(5, -2))
-            url.searchParams.delete("format")
-            url.searchParams.set("name", "orig")
-            return url.toString()
-        })
+    private static findEntitiesInner(tweetObject?: ITweetdeckTweet): number {
+        if (!tweetObject)
+            return 0
+        console.info("Tweet Object", tweetObject)
 
-        imageUrls.forEach(url => {
-            const mediaContainer = document.createElement("div");
-            const photoContainer = document.createElement("img");
+        for (const medium of tweetObject.entities.media) {
+            if (medium.type === "video" || medium.type === "animated_gif") {
+                const videoElement = document.createElement("video");
+                videoElement.loop = true;
+                videoElement.poster = medium.media_url_https;
+                videoElement.controls = true;
+                for (const source of medium.video_info.variants) {
+                    const sourceElement = document.createElement("source");
+                    sourceElement.src = source.url ?? "";
+                    sourceElement.type = source.content_type;
+                    videoElement.appendChild(sourceElement);
+                }
 
-            photoContainer.setAttribute("src", url);
+                this.overlayElementQueue.push(videoElement);
+            } else {
+                const imageElement = document.createElement("img");
+                const imageUrl = new URL(medium.media_url_https);
+                imageUrl.searchParams.set("name", "orig");
+                imageElement.src = imageUrl.toString();
+                this.overlayElementQueue.push(imageElement);
+            }
+        }
 
-            mediaContainer.appendChild(photoContainer);
-
-            this.overlayElementQueue.push(mediaContainer);
-        })
-
-        return imageUrls.length;
+        return tweetObject.entities.media.length + this.findEntitiesInner(tweetObject.quotedTweet);
     }
 
     public static initialize() {
