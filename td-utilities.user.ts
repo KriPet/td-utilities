@@ -46,7 +46,7 @@ interface ITweetdeckTweet {
 type IMedia = IVideoMedia | IPhotoMedia;
 
 interface IVideoMedia {
-    video_info: { variants: { url: string, content_type: string }[] }
+    video_info: { variants: { url: string, content_type: string, bitrate?: number }[] }
     type: "video" | "animated_gif"
     media_url_https: string
 }
@@ -183,7 +183,9 @@ class TweetdeckUtilities {
                 videoElement.loop = true;
                 videoElement.poster = medium.media_url_https;
                 videoElement.controls = true;
-                for (const source of medium.video_info.variants) {
+                const variants = Array.from(medium.video_info.variants);
+                variants.sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))
+                for (const source of variants) {
                     const sourceElement = document.createElement("source");
                     sourceElement.src = source.url ?? "";
                     sourceElement.type = source.content_type;

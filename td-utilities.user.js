@@ -118,7 +118,9 @@ class TweetdeckUtilities {
                 videoElement.loop = true;
                 videoElement.poster = medium.media_url_https;
                 videoElement.controls = true;
-                for (const source of medium.video_info.variants) {
+                const variants = Array.from(medium.video_info.variants);
+                variants.sort((a, b) => { var _a, _b; return ((_a = b.bitrate) !== null && _a !== void 0 ? _a : 0) - ((_b = a.bitrate) !== null && _b !== void 0 ? _b : 0); });
+                for (const source of variants) {
                     const sourceElement = document.createElement("source");
                     sourceElement.src = (_a = source.url) !== null && _a !== void 0 ? _a : "";
                     sourceElement.type = source.content_type;
