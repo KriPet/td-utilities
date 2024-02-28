@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweetdeck utilities
 // @namespace    http://bakemo.no/
-// @version      1.5.0
+// @version      1.5.1
 // @author       Peter Kristoffersen
 // @description  Press "-" to clear column, press "q" to open images in selected tweet in full screen.
 // @match        https://tweetdeck.twitter.com/*
@@ -89,23 +89,32 @@ class TweetdeckUtilities {
     private static initialized = false;
 
     private static clearSelectedColumn(): void {
-        const columns = unsafeWindow.TD.controller.columnManager.getAllOrdered()
         const selectedTweetElem = document.querySelector(".is-selected-tweet") as HTMLDivElement | null
-        const selectedTweetDataset = selectedTweetElem?.dataset as null | { "key": undefined }
+        const selectedTweetDataset = selectedTweetElem?.dataset as null | { "key": undefined | string }
 
         const selectedTweetId = selectedTweetDataset?.key
-        if (selectedTweetId == null) {
+        if (selectedTweetElem == null || selectedTweetId == null) {
             this.log("No selected tweet, will not clear column")
             return
         }
 
-        for (const col of columns) {
-            const tweet = col.findChirp(selectedTweetId)
-            if (tweet) {
-                this.clearUpTo(col, tweet)
-                return
-            }
+        const columnElem = selectedTweetElem.closest(".js-column") as HTMLElement | null;
+        const columnDataSet = columnElem?.dataset as null | { "column": undefined | string }
+        const columnId = columnDataSet?.column
+
+        if (columnId == null) {
+            this.log("Could not find column")
+            return
         }
+
+        const column = unsafeWindow.TD.controller.columnManager.get(columnId)
+
+        const tweet = column.findChirp(selectedTweetId)
+        if (tweet) {
+            this.clearUpTo(column, tweet)
+            return
+        }
+
         this.log(`Could not find tweet with ID '${selectedTweetId}'`)
     }
 
